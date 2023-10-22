@@ -46,7 +46,7 @@ func newS3AccountInfo(nWorker int) *s3AccountInfo {
 		dstRegion:  *dstRegion,
 		s3ObjCh: startCh{
 			startObjCh: make(chan objContent),
-			totalCh:    make(chan int64, nWorker),
+			totalCh:    make(chan int64, 512),
 		},
 	}
 }
@@ -112,11 +112,10 @@ func formatSize(size int64) string {
 }
 
 func (s *s3AccountInfo) s3CopyWorker(s3Client s3.Client) error {
-	total := int64(0)
+	//total := int64(0)
 	for {
 		obj, ok := <-s.s3ObjCh.startObjCh
 		if !ok {
-			s.s3ObjCh.totalCh <- total
 			return nil
 		}
 
@@ -125,7 +124,7 @@ func (s *s3AccountInfo) s3CopyWorker(s3Client s3.Client) error {
 			return err
 		}
 		fmt.Println("copying:", *obj.objKey.Key, "size of:", formatSize(obj.objSize))
-		total += obj.objSize
+		s.s3ObjCh.totalCh <- obj.objSize
 	}
 }
 
@@ -166,6 +165,13 @@ func main() {
 	}
 
 	go func() {
+		for objSize := range s.s3ObjCh.totalCh {
+			totalSize += objSize
+			fmt.Printf("%s\r", formatSize(totalSize))
+		}
+	}()
+
+	go func() {
 		err = s.sendS3Objects(*s3Client, listObjs)
 		if err != nil {
 			fmt.Printf("error: %v\n", err)
@@ -178,11 +184,7 @@ func main() {
 
 	close(s.s3ObjCh.totalCh)
 
-	for objSize := range s.s3ObjCh.totalCh {
-		totalSize += objSize
-	}
-
-	fmt.Println(formatSize(totalSize))
+	fmt.Println("total copied size:", formatSize(totalSize))
 	fmt.Printf("the whole process took: %.2f minutes\n", time.Since(t).Minutes())
 
 }
