@@ -13,7 +13,13 @@ import (
 )
 
 type startCh struct {
-	startObjCh chan *s3.CopyObjectInput
+	startObjCh chan objContent
+	totalCh    chan int64
+}
+
+type objContent struct {
+	objKey  *s3.CopyObjectInput
+	objSize int64
 }
 
 type s3AccountInfo struct {
@@ -25,7 +31,7 @@ type s3AccountInfo struct {
 	s3ObjCh    startCh
 }
 
-func newS3AccountInfo() *s3AccountInfo {
+func newS3AccountInfo(nWorker int) *s3AccountInfo {
 	srcProfile := flag.String("srcProfile", "default", "set the source account profile")
 	srcBucket := flag.String("srcBucket", "srcBucket", "set the source bucket name")
 	dstBucket := flag.String("dstBucket", "dstBucket", "set the destination bucket name")
@@ -39,7 +45,8 @@ func newS3AccountInfo() *s3AccountInfo {
 		srcRegion:  *srcRegion,
 		dstRegion:  *dstRegion,
 		s3ObjCh: startCh{
-			startObjCh: make(chan *s3.CopyObjectInput),
+			startObjCh: make(chan objContent),
+			totalCh:    make(chan int64, nWorker),
 		},
 	}
 }
@@ -62,7 +69,10 @@ outerfor:
 				CopySource: aws.String(s.srcBucket + "/" + *listObj.Key),
 				Key:        aws.String(*listObj.Key),
 			}
-			s.s3ObjCh.startObjCh <- input
+			s.s3ObjCh.startObjCh <- objContent{
+				objKey:  input,
+				objSize: listObj.Size,
+			}
 		}
 
 		if listObjs.IsTruncated {
@@ -82,35 +92,58 @@ outerfor:
 	return nil
 }
 
-func (s *s3AccountInfo) S3CopyWorker(s3Client s3.Client) error {
+func formatSize(size int64) string {
+	const (
+		KB = 1 << 10
+		MB = 1 << 20
+		GB = 1 << 30
+	)
+
+	switch {
+	case size >= GB:
+		return fmt.Sprintf("%.2f GB", float64(size)/float64(GB))
+	case size >= MB:
+		return fmt.Sprintf("%.2f MB", float64(size)/float64(MB))
+	case size >= KB:
+		return fmt.Sprintf("%.2f KB", float64(size)/float64(KB))
+	default:
+		return fmt.Sprintf("%d bytes", size)
+	}
+}
+
+func (s *s3AccountInfo) s3CopyWorker(s3Client s3.Client) error {
+	total := int64(0)
 	for {
 		obj, ok := <-s.s3ObjCh.startObjCh
 		if !ok {
+			s.s3ObjCh.totalCh <- total
 			return nil
 		}
 
-		_, err := s3Client.CopyObject(context.TODO(), obj)
+		_, err := s3Client.CopyObject(context.TODO(), obj.objKey)
 		if err != nil {
 			return err
 		}
-		fmt.Println("copying:", *obj.Key)
+		fmt.Println("copying:", *obj.objKey.Key, "size of:", formatSize(obj.objSize))
+		total += obj.objSize
 	}
 }
 
 func main() {
 
 	var (
-		s          = newS3AccountInfo()
+		numWorkers = 100
+		s          = newS3AccountInfo(numWorkers)
 		t          = time.Now()
+		totalSize  = int64(0)
 		wg         = sync.WaitGroup{}
-		numWorkers = 20
 	)
 
 	fmt.Printf("%+v\n", s)
 
 	s3Config, err := startConfig(s.srcProfile, s.srcRegion)
 	if err != nil {
-		fmt.Printf("error while initializing config: %v\n", err)
+		fmt.Printf("error initializing config: %v\n", err)
 	}
 
 	s3Client := s3.NewFromConfig(s3Config)
@@ -119,7 +152,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.S3CopyWorker(*s3Client)
+			s.s3CopyWorker(*s3Client)
 		}()
 	}
 
@@ -143,6 +176,13 @@ func main() {
 
 	wg.Wait()
 
+	close(s.s3ObjCh.totalCh)
+
+	for objSize := range s.s3ObjCh.totalCh {
+		totalSize += objSize
+	}
+
+	fmt.Println(formatSize(totalSize))
 	fmt.Printf("the whole process took: %.2f minutes\n", time.Since(t).Minutes())
 
 }
