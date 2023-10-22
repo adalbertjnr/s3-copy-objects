@@ -46,7 +46,7 @@ func newS3AccountInfo(nWorker int) *s3AccountInfo {
 		dstRegion:  *dstRegion,
 		s3ObjCh: startCh{
 			startObjCh: make(chan objContent),
-			totalCh:    make(chan int64, 512),
+			totalCh:    make(chan int64, 256),
 		},
 	}
 }
@@ -167,7 +167,7 @@ func main() {
 	go func() {
 		for objSize := range s.s3ObjCh.totalCh {
 			totalSize += objSize
-			fmt.Printf("%s\r", formatSize(totalSize))
+			fmt.Printf("currently %s copied\r", formatSize(totalSize))
 		}
 	}()
 
@@ -184,7 +184,7 @@ func main() {
 
 	close(s.s3ObjCh.totalCh)
 
-	fmt.Println("total copied size:", formatSize(totalSize))
+	fmt.Println("total copied:", formatSize(totalSize))
 	fmt.Printf("the whole process took: %.2f minutes\n", time.Since(t).Minutes())
 
 }
