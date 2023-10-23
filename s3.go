@@ -46,7 +46,7 @@ func newS3AccountInfo(nWorker int) *s3AccountInfo {
 		dstRegion:  *dstRegion,
 		s3ObjCh: startCh{
 			startObjCh: make(chan objContent),
-			totalCh:    make(chan int64, 256),
+			totalCh:    make(chan int64),
 		},
 	}
 }
@@ -94,9 +94,9 @@ outerfor:
 
 func formatSize(size int64) string {
 	const (
-		KB = 1 << 10
-		MB = 1 << 20
-		GB = 1 << 30
+		KB = 1024
+		MB = 1024 * KB
+		GB = 1024 * MB
 	)
 
 	switch {
