@@ -45,8 +45,8 @@ func newS3AccountInfo() *s3AccountInfo {
 		srcRegion:  *srcRegion,
 		dstRegion:  *dstRegion,
 		s3ObjCh: startCh{
-			startObjCh: make(chan objContent),
-			totalCh:    make(chan int64),
+			startObjCh: make(chan objContent, 512),
+			totalCh:    make(chan int64, 512),
 		},
 	}
 }
@@ -112,7 +112,6 @@ func formatSize(size int64) string {
 }
 
 func (s *s3AccountInfo) s3CopyWorker(s3Client s3.Client, workerId int) error {
-	//total := int64(0)
 	for {
 		obj, ok := <-s.s3ObjCh.startObjCh
 		if !ok {
