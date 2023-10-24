@@ -31,7 +31,7 @@ type s3AccountInfo struct {
 	s3ObjCh    startCh
 }
 
-func newS3AccountInfo(nWorker int) *s3AccountInfo {
+func newS3AccountInfo() *s3AccountInfo {
 	srcProfile := flag.String("srcProfile", "default", "set the source account profile")
 	srcBucket := flag.String("srcBucket", "srcBucket", "set the source bucket name")
 	dstBucket := flag.String("dstBucket", "dstBucket", "set the destination bucket name")
@@ -111,7 +111,7 @@ func formatSize(size int64) string {
 	}
 }
 
-func (s *s3AccountInfo) s3CopyWorker(s3Client s3.Client) error {
+func (s *s3AccountInfo) s3CopyWorker(s3Client s3.Client, workerId int) error {
 	//total := int64(0)
 	for {
 		obj, ok := <-s.s3ObjCh.startObjCh
@@ -123,7 +123,7 @@ func (s *s3AccountInfo) s3CopyWorker(s3Client s3.Client) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println("copying:", *obj.objKey.Key, "size of:", formatSize(obj.objSize))
+		fmt.Println("worker", workerId, "-> copying:", *obj.objKey.Key, "size of:", formatSize(obj.objSize))
 		s.s3ObjCh.totalCh <- obj.objSize
 	}
 }
@@ -132,7 +132,7 @@ func main() {
 
 	var (
 		numWorkers = 100
-		s          = newS3AccountInfo(numWorkers)
+		s          = newS3AccountInfo()
 		t          = time.Now()
 		totalSize  = int64(0)
 		wg         = sync.WaitGroup{}
@@ -149,10 +149,10 @@ func main() {
 
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
-			s.s3CopyWorker(*s3Client)
-		}()
+			s.s3CopyWorker(*s3Client, i)
+		}(i)
 	}
 
 	listObjs, err := s3Client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
@@ -165,9 +165,11 @@ func main() {
 	}
 
 	go func() {
+		count := int64(0)
 		for objSize := range s.s3ObjCh.totalCh {
+			count++
 			totalSize += objSize
-			fmt.Printf("currently %s copied\r", formatSize(totalSize))
+			fmt.Printf("currently %s copied -> items %d\r", formatSize(totalSize), count)
 		}
 	}()
 
