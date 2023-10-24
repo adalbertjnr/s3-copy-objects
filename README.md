@@ -1,4 +1,4 @@
-# simple golang script to copy buckets from content A to content B.
+# simple golang script to copy objects between buckets.
 
 why use it instead of the CLI?
 
