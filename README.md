@@ -2,7 +2,7 @@
 
 why use it instead of the CLI?
 
-I've done a few tests with a s3 bucket with 3000 contents in it.
+results of a test with 3000 objects in a s3 bucket:
 
 CLI -> All 3000 objects were copied in 1 minute and 20 seconds.
 
